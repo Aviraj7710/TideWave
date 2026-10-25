@@ -1,0 +1,1120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Tidewatch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Saira+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>[hidden]{display:none!important}body{margin:0}img{max-width:100%}</style>
+</head>
+<body>
+<style>
+/* Layout: full-height night-ops console. Live sea map fills the left, the agent's column (stages, dossier, log, guardrails) runs down the right. Stacks on phones. */
+:root{
+  color-scheme:dark;
+  --abyss:#071820; --hull:#0c232c; --hull-2:#11303a; --rule:#1c3d48;
+  --ink:#dbe8eb; --ink-2:#93acb4; --ink-3:#5f7d87;
+  --seaglass:#6fd3c6; --ally:#8fb6ff; --amber:#efb258; --coral:#ff6b57; --ok:#9fd08c;
+  --land:#26403f; --land-edge:#4f7172;
+  --f-display:"Saira Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{background:var(--abyss);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.45}
+*{box-sizing:border-box}
+button{font:inherit;color:inherit}
+button:focus-visible{outline:2px solid var(--seaglass);outline-offset:2px}
+
+.app{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr);gap:10px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:12px}
+
+/* top bar */
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:12px 28px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand svg{flex:none}
+.brand h1{margin:0;font-family:var(--f-display);font-weight:700;font-size:28px;letter-spacing:.06em;text-transform:uppercase;line-height:1}
+.brand p{margin:2px 0 0;color:var(--ink-2);font-size:12px;letter-spacing:.04em}
+.metrics{display:flex;flex-wrap:wrap;gap:6px 22px;margin:0}
+.metrics div{display:flex;flex-direction:column}
+.metrics dt{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.metrics dd{margin:0;font-family:var(--f-mono);font-size:15px;font-variant-numeric:tabular-nums}
+.metrics dd.crit{color:var(--coral)}
+.controls{margin-left:auto;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.ctl{background:var(--hull);border:1px solid var(--rule);border-radius:3px;padding:6px 10px;font-size:12px;cursor:pointer;letter-spacing:.03em}
+.ctl:hover{border-color:var(--ink-3)}
+.ctl[aria-pressed="true"]{border-color:var(--seaglass);color:var(--seaglass)}
+#tplus{display:none}
+.tplus{font-family:var(--f-mono);font-size:12px;color:var(--ink-3);padding:0 4px;font-variant-numeric:tabular-nums}
+.restore{position:fixed;top:calc(6px + env(safe-area-inset-top,0px));right:calc(6px + env(safe-area-inset-right,0px));z-index:30;opacity:0;background:var(--hull);border:1px solid var(--rule);border-radius:3px;font-size:11px;padding:4px 8px;cursor:pointer}
+.restore:hover,.restore:focus-visible{opacity:1}
+body.clean .controls{display:none}
+
+/* main grid */
+.main{display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:12px;min-height:0}
+.stage{position:relative;min-height:0;border:1px solid var(--rule);border-radius:4px;overflow:hidden;background:var(--abyss)}
+.mapbox{position:absolute;inset:0}
+.mapbox canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.caption{position:absolute;left:14px;bottom:12px;pointer-events:none}
+.caption .eyebrow{color:var(--seaglass)}
+.caption b{display:block;font-family:var(--f-display);font-size:20px;font-weight:600;letter-spacing:.05em;text-transform:uppercase}
+.legend{position:absolute;right:12px;bottom:12px;display:grid;grid-template-columns:auto auto;gap:4px 14px;padding:8px 10px;background:color-mix(in srgb,var(--abyss) 82%,transparent);border:1px solid var(--rule);border-radius:3px;font-size:11px;color:var(--ink-2)}
+.legend span{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.legend i{width:8px;height:8px;display:inline-block;border-radius:50%}
+
+.eyebrow{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+
+/* call card on map */
+.call{position:absolute;top:12px;right:12px;width:330px;max-width:calc(100% - 24px);background:color-mix(in srgb,var(--hull) 92%,transparent);border:1px solid var(--rule);border-radius:4px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.call header{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.call h3{margin:2px 0 0;font-family:var(--f-display);font-size:18px;font-weight:600;letter-spacing:.04em}
+.call .live{font-family:var(--f-mono);font-size:12px;color:var(--coral);display:flex;align-items:center;gap:6px}
+.call .live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--coral);animation:blink 1s infinite}
+.call canvas{width:100%;height:34px;display:block}
+.lines{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.lines li{font-size:13px;line-height:1.4}
+.lines li b{font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;display:block;font-weight:500}
+.lines li.agent b{color:var(--seaglass)}
+.lines li.capt b{color:var(--ally)}
+
+/* modal + summary */
+.overlay{position:absolute;inset:0;display:grid;place-items:center;background:color-mix(in srgb,var(--abyss) 40%,transparent);padding:16px}
+.dialog{width:440px;max-width:100%;background:var(--hull);border:1px solid var(--amber);border-radius:4px;padding:18px;display:flex;flex-direction:column;gap:12px;box-shadow:0 20px 60px rgb(0 0 0 / .5)}
+.dialog h3{margin:0;font-family:var(--f-display);font-size:24px;font-weight:600;letter-spacing:.03em;text-wrap:balance}
+.dialog p{margin:0;color:var(--ink-2)}
+.dialog ul{margin:0;padding-left:18px;color:var(--ink);font-size:13px;display:flex;flex-direction:column;gap:2px}
+.dialog .btns{display:flex;flex-wrap:wrap;gap:8px}
+.btn{border-radius:3px;padding:9px 14px;font-weight:600;cursor:pointer;border:1px solid var(--rule);background:var(--hull-2)}
+.btn.primary{background:var(--amber);border-color:var(--amber);color:#1a1205}
+.btn.primary.armed{box-shadow:0 0 0 3px color-mix(in srgb,var(--amber) 40%,transparent)}
+.auto{font-family:var(--f-mono);font-size:11px;color:var(--ink-3)}
+.summary .dialog{border-color:var(--seaglass);width:520px}
+.timeline{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.timeline div{border-top:2px solid var(--rule);padding-top:6px}
+.timeline div:last-child{border-top-color:var(--seaglass)}
+.timeline b{display:block;font-family:var(--f-mono);font-size:18px;font-variant-numeric:tabular-nums}
+.timeline span{font-size:11px;color:var(--ink-2)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:8px}
+.tiles div{background:var(--hull-2);border-radius:3px;padding:8px}
+.tiles b{display:block;font-family:var(--f-display);font-size:26px;line-height:1;font-weight:600}
+.tiles span{font-size:11px;color:var(--ink-2)}
+
+/* side column */
+.side{display:flex;flex-direction:column;gap:8px;min-height:0;min-width:0}
+.panel{background:var(--hull);border:1px solid var(--rule);border-radius:4px;padding:12px}
+.statusrow{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.status{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;padding:3px 8px;border-radius:2px;border:1px solid currentColor}
+.status.calm{color:var(--seaglass)} .status.warn{color:var(--amber)} .status.crit{color:var(--coral)} .status.ok{color:var(--ok)}
+.stages{list-style:none;margin:10px 0 0;padding:0;display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
+.stages li{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;text-align:center;color:var(--ink-3);padding-top:6px;border-top:3px solid var(--rule);transition:color .3s,border-color .3s}
+.stages li.active{color:var(--amber);border-top-color:var(--amber)}
+.stages li.done{color:var(--seaglass);border-top-color:var(--seaglass)}
+
+.dossier header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.dossier h2{margin:2px 0 0;font-family:var(--f-display);font-size:24px;font-weight:600;letter-spacing:.04em;line-height:1}
+.pill{font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;padding:3px 7px;border-radius:2px;background:color-mix(in srgb,var(--amber) 18%,transparent);color:var(--amber);white-space:nowrap}
+.pill.crit{background:color-mix(in srgb,var(--coral) 18%,transparent);color:var(--coral)}
+.facts{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin:8px 0 0}
+.facts dt{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.facts dd{margin:0;font-size:13px;font-variant-numeric:tabular-nums}
+.facts dd.bad{color:var(--coral)}
+.evidence{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.evidence figure{margin:0;position:relative;min-width:0}
+.evidence canvas{width:100%;aspect-ratio:2/1;display:block;border-radius:2px;background:#050d11}
+.evidence figcaption{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-top:3px}
+.evidence .wait{position:absolute;inset:0 0 18px;display:grid;place-items:center;font-size:11px;color:var(--ink-3);border:1px dashed var(--rule);border-radius:2px;background:#050d11;text-align:center;padding:4px}
+.risk{margin-top:10px}
+.riskhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.riskhead b{font-family:var(--f-display);font-size:30px;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums;transition:color .4s}
+.riskhead span{font-size:11px;color:var(--ink-2)}
+.factors{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
+.factors li{display:grid;grid-template-columns:minmax(0,1fr) 54px 34px;gap:8px;align-items:center;font-size:12px;color:var(--ink-2);transition:opacity .4s}
+.factors li.pending{opacity:.38}
+.factors li.zero{opacity:.6}
+.factors small{font-family:var(--f-mono);font-size:10px;color:var(--ink-3);margin-left:5px;white-space:nowrap}
+.factors .bar{height:5px;background:var(--hull-2);border-radius:3px;overflow:hidden}
+.factors .bar i{display:block;height:100%;width:0;background:var(--amber);transition:width .9s ease}
+.factors em{font-style:normal;font-family:var(--f-mono);font-size:11px;text-align:right;color:var(--ink)}
+.math{margin-top:6px;font-family:var(--f-mono);font-size:11px;color:var(--ink-2);line-height:1.55;overflow-wrap:anywhere}
+.math b{color:var(--ink);font-weight:500}
+.tiers{margin-top:8px}
+.track{position:relative;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--hull-2) 0 25%,color-mix(in srgb,var(--amber) 45%,var(--hull-2)) 25% 50%,color-mix(in srgb,var(--ally) 55%,var(--hull-2)) 50% 75%,color-mix(in srgb,var(--coral) 60%,var(--hull-2)) 75% 100%)}
+.track .needle{position:absolute;top:-4px;width:2px;height:16px;background:var(--ink);left:0;transform:translateX(-1px)}
+.tlabels{display:grid;grid-template-columns:repeat(4,1fr);font-family:var(--f-mono);font-size:9px;color:var(--ink-3);margin-top:4px;letter-spacing:.04em}
+.tlabels span{border-left:1px solid var(--rule);padding-left:4px}
+.tlabels span:first-child{border-left:0;padding-left:0}
+.tnow{margin-top:5px;font-size:12px;color:var(--ink-2)}
+.tnow b{font-weight:600;color:var(--ink)}
+.fine{display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px;color:var(--ink-2)}
+.fine b{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:500;margin-bottom:2px}
+.feedwrap{flex:1;min-height:90px;display:flex;flex-direction:column;padding:0;overflow:hidden}
+.feedwrap .eyebrow{padding:10px 12px 6px}
+.feed{list-style:none;margin:0;padding:0 12px 12px;overflow:auto;display:flex;flex-direction:column;gap:8px;min-height:0}
+.feed li{display:grid;grid-template-columns:44px minmax(0,1fr);gap:2px 8px;padding-left:8px;border-left:2px solid var(--rule);animation:enter .4s ease}
+.feed li.warn{border-left-color:var(--amber)} .feed li.crit{border-left-color:var(--coral)} .feed li.ok{border-left-color:var(--ok)}
+.feed .ts{font-family:var(--f-mono);font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.feed .tag{font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;color:var(--ink-2)}
+.feed p{grid-column:1/-1;margin:0;font-size:13px}
+
+.guard{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.guard div{min-width:0}
+.guard b{display:block;font-family:var(--f-mono);font-size:15px;font-variant-numeric:tabular-nums}
+.guard span{font-size:10px;line-height:1.25;color:var(--ink-3);display:block}
+
+@keyframes blink{50%{opacity:.25}}
+@keyframes enter{from{opacity:.2;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+
+@media (max-width: 980px){
+  html,body{height:auto}
+  .app{height:auto}
+  .main{grid-template-columns:1fr}
+  .stage{display:flex;flex-direction:column;overflow:visible;border:0}
+  .mapbox{position:relative;aspect-ratio:1/1;border:1px solid var(--rule);border-radius:4px;overflow:hidden}
+  .call{position:static;width:auto;max-width:none;margin-top:10px}
+  .overlay{position:absolute}
+  .legend{display:none}
+  .feed{max-height:360px}
+  .controls{margin-left:0}
+}
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+        <circle cx="17" cy="17" r="15" fill="none" stroke="var(--rule)" stroke-width="1.5"/>
+        <circle cx="17" cy="17" r="9" fill="none" stroke="var(--rule)" stroke-width="1.5"/>
+        <path d="M17 17 L17 2 A15 15 0 0 1 30 10 Z" fill="var(--seaglass)" opacity=".55"/>
+        <circle cx="24" cy="12" r="2.2" fill="var(--coral)"/>
+      </svg>
+      <div><h1>Tidewatch</h1><p>Autonomous reserve patrol · Galápagos</p></div>
+    </div>
+    <dl class="metrics">
+      <div><dt>Local time (GALT)</dt><dd id="clock">02:00:00</dd></div>
+      <div><dt>Vessels tracked</dt><dd id="mVessels">0</dd></div>
+      <div><dt>Dark contacts</dt><dd id="mDark">0</dd></div>
+      <div><dt>Humans paged</dt><dd id="mPages">0</dd></div>
+    </dl>
+    <div class="controls">
+      <span class="tplus" id="seedLbl">Night #0</span>
+      <span class="tplus" id="tplus">T+00:00</span>
+      <button class="ctl" id="bNew" title="N">New night</button>
+      <button class="ctl" id="bPlay" title="Space">Pause</button>
+      <button class="ctl" id="bRestart" title="R">Replay night</button>
+      <button class="ctl" id="bSpeed">Speed 1×</button>
+      <button class="ctl" id="bVoice" aria-pressed="false">Voice off</button>
+      <button class="ctl" id="bClean" title="H">Hide controls</button>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="stage">
+      <div class="mapbox" id="mapbox">
+        <canvas id="map"></canvas>
+        <div class="caption"><div class="eyebrow">Galápagos Marine Reserve</div><b>Southern boundary watch</b></div>
+        <div class="legend" aria-label="Map legend">
+          <span><i style="background:var(--ink-2)"></i>Fishing fleet, transponder on</span>
+          <span><i style="background:var(--ink)"></i>Licensed local boats</span>
+          <span><i style="background:var(--ally)"></i>Patrol boat · drone</span>
+          <span><i style="background:var(--coral)"></i>Dark vessel</span>
+        </div>
+        <div class="overlay" id="decide" hidden>
+          <div class="dialog" role="dialog" aria-labelledby="decTitle">
+            <div class="eyebrow" style="color:var(--amber)">Decision needed · Duty commander</div>
+            <h3 id="decTitle">Board SEA LANTERN 7?</h3>
+            <p>Tidewatch has done everything it is allowed to do on its own. The evidence package:</p>
+            <ul id="decList"></ul>
+            <div class="btns">
+              <button class="btn primary" id="bBoard">Authorize boarding</button>
+              <button class="btn" id="bShadow">Keep shadowing</button>
+            </div>
+            <div class="auto" id="autoNote">Demo picks boarding in 8 s</div>
+          </div>
+        </div>
+        <div class="overlay summary" id="summary" hidden>
+          <div class="dialog">
+            <div class="eyebrow" style="color:var(--seaglass)">Night watch report</div>
+            <h3 id="sumHead">Night report</h3>
+            <div class="timeline">
+              <div><b id="sumT1">--:--</b><span id="sumL1"></span></div>
+              <div><b id="sumT2">--:--</b><span id="sumL2"></span></div>
+              <div><b id="sumT3">--:--</b><span id="sumL3"></span></div>
+            </div>
+            <div class="tiles">
+              <div><b id="sumVessels">0</b><span>vessels watched</span></div>
+              <div><b id="sumFalse">0</b><span>false alarms dismissed</span></div>
+              <div><b id="sumSpend">$0</b><span>imagery spent</span></div>
+              <div><b id="sumPages">0</b><span>humans paged</span></div>
+            </div>
+            <div class="fine">
+              <div><b>Plugs into</b>Feeds coastal nations already use: Sentinel-1 radar, VIIRS night lights, Global Fishing Watch and Skylight vessel data.</div>
+              <div><b>Who pays</b>Navies and coast guards, marine insurers, and shipping compliance teams tracking ships that go dark.</div>
+            </div>
+            <div class="auto" id="sumSeed"></div>
+            <div class="btns"><button class="btn primary" id="bNew2">New night</button><button class="btn" id="bReplay">Replay this night</button></div>
+          </div>
+        </div>
+      </div>
+
+      <article class="call" id="call" hidden>
+        <header>
+          <div><div class="eyebrow">Voice call · no screen needed</div><h3 id="callTitle">Patrol bridge</h3></div>
+          <span class="live" id="callTime">00:00</span>
+        </header>
+        <canvas id="wave" height="34"></canvas>
+        <ul class="lines" id="lines"></ul>
+      </article>
+    </section>
+
+    <aside class="side">
+      <div class="panel">
+        <div class="statusrow">
+          <div class="eyebrow">Agent</div>
+          <span class="status calm" id="status">WATCHING</span>
+        </div>
+        <ol class="stages" id="stages">
+          <li data-s="DETECT">DETECT</li><li data-s="VERIFY">VERIFY</li><li data-s="SCORE">SCORE</li>
+          <li data-s="DISPATCH">DISPATCH</li><li data-s="ESCALATE">ESCALATE</li><li data-s="HUMAN">HUMAN</li>
+        </ol>
+      </div>
+
+      <article class="panel dossier" id="dossier" hidden>
+        <header>
+          <div><div class="eyebrow" id="dosTrack">Target dossier</div><h2 id="dosName">-</h2></div>
+          <span class="pill" id="dosPill">TRANSPONDER OFF</span>
+        </header>
+        <dl class="facts">
+          <div><dt>Registered as</dt><dd id="dosType">-</dd></div>
+          <div><dt>Reserve license</dt><dd id="dosLic">-</dd></div>
+          <div><dt>Last position report</dt><dd id="dosFix">-</dd></div>
+          <div><dt>Silent for</dt><dd id="gap">0 min</dd></div>
+        </dl>
+        <div class="evidence">
+          <figure><canvas id="sar" width="320" height="200"></canvas><figcaption id="sarCap">Radar</figcaption><span class="wait" id="sarWait">Waiting for radar pass</span></figure>
+          <figure><canvas id="ir" width="320" height="200"></canvas><figcaption id="irCap">Thermal · drone</figcaption><span class="wait" id="irWait">Waiting for drone</span></figure>
+        </div>
+        <div class="risk" id="risk">
+          <div class="riskhead"><b id="riskVal">0.00</b><span>chance of illegal fishing · logistic model</span></div>
+          <ul class="factors" id="factors"></ul>
+          <div class="math" id="math"></div>
+          <div class="tiers">
+            <div class="track"><i class="needle" id="needle"></i></div>
+            <div class="tlabels"><span>0</span><span>0.25 WATCH</span><span>0.50 DRONE</span><span>0.75 PATROL</span></div>
+            <div class="tnow" id="tnow"></div>
+          </div>
+        </div>
+      </article>
+
+      <section class="panel feedwrap">
+        <div class="eyebrow">Agent log</div>
+        <ol class="feed" id="feed" reversed></ol>
+      </section>
+
+      <div class="panel">
+        <div class="eyebrow" style="margin-bottom:8px">Guardrails</div>
+        <div class="guard">
+          <div><b id="gSupp">0</b><span>false alarms dismissed</span></div>
+          <div><b id="gSpend">$0</b><span>imagery spend, $1,500 cap</span></div>
+          <div><b id="gSort">0/2</b><span>drone sorties tonight</span></div>
+          <div><b id="gPage">0</b><span>humans paged</span></div>
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+<button class="restore" id="bRestore">Show controls</button>
+
+<script>
+(() => {
+const $ = s => document.getElementById(s);
+const cs = getComputedStyle(document.documentElement);
+const C = {};
+['abyss','hull','hull-2','rule','ink','ink-2','ink-3','seaglass','ally','amber','coral','ok','land','land-edge'].forEach(k => C[k] = cs.getPropertyValue('--'+k).trim());
+const FMONO = cs.getPropertyValue('--f-mono'), FDISP = cs.getPropertyValue('--f-display');
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
+const DEG = Math.PI/180, NM = 60, TICK = 0.1;
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const lerp = (a,b,k) => a + (b-a)*k;
+const ease = k => k<.5 ? 2*k*k : 1-Math.pow(-2*k+2,2)/2;
+const SIG = z => 1/(1 + Math.exp(-z));
+const dist = (a,b) => Math.hypot(a[0]-b[0], a[1]-b[1]);
+const rng = seed => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed>>>15, 1|seed); t = t + Math.imul(t ^ t>>>7, 61|t) ^ t; return ((t ^ t>>>14)>>>0)/4294967296; };
+
+/* ================= geography (stylized) ================= */
+const VIEW = {lon0:-92.45, lon1:-88.3, lat0:-2.6, lat1:0.82};
+function blob(cx, cy, rx, ry, rot, seed, n = 44){
+  const r = rng(seed), ph = [0,1,2,3,4].map(() => r()*6.283), amp = [.11,.07,.05,.03,.02], out = [];
+  for (let i = 0; i < n; i++){
+    const a = i/n*2*Math.PI; let k = 1;
+    for (let j = 0; j < 5; j++) k += amp[j]*Math.sin(a*(j+2)+ph[j]);
+    const x = rx*k*Math.cos(a), y = ry*k*Math.sin(a);
+    out.push([cx + x*Math.cos(rot) - y*Math.sin(rot), cy + x*Math.sin(rot) + y*Math.cos(rot)]);
+  }
+  return out;
+}
+function chaikin(p, it){
+  for (let s = 0; s < it; s++){
+    const q = [];
+    for (let i = 0; i < p.length; i++){ const a = p[i], b = p[(i+1)%p.length]; q.push([.75*a[0]+.25*b[0], .75*a[1]+.25*b[1]], [.25*a[0]+.75*b[0], .25*a[1]+.75*b[1]]); }
+    p = q;
+  }
+  return p;
+}
+const isabela = chaikin([[-91.36,0.15],[-91.22,0.07],[-91.15,-0.12],[-91.12,-0.3],[-90.95,-0.45],[-90.84,-0.58],[-90.86,-0.8],[-91.02,-0.98],[-91.25,-1.0],[-91.42,-0.92],[-91.3,-0.78],[-91.2,-0.64],[-91.3,-0.48],[-91.4,-0.3],[-91.43,-0.12],[-91.4,0.03]], 3);
+const ISL = [
+  {n:'Isabela', p:isabela, l:[-91.05,-0.72]},
+  {n:'Fernandina', p:blob(-91.54,-0.38,.12,.11,0,3), l:[-91.54,-0.56]},
+  {n:'Santiago', p:blob(-90.76,-0.23,.16,.12,.3,5), l:[-90.76,-0.06]},
+  {n:'Santa Cruz', p:blob(-90.36,-0.63,.19,.16,0,7), l:[-90.36,-0.63]},
+  {n:'', p:blob(-90.28,-0.43,.035,.04,0,9,24)},
+  {n:'', p:blob(-90.66,-0.6,.04,.035,0,11,24)},
+  {n:'', p:blob(-90.06,-0.82,.045,.035,0,13,24)},
+  {n:'San Cristóbal', p:blob(-89.47,-0.84,.27,.1,.45,15), l:[-89.42,-0.64]},
+  {n:'Floreana', p:blob(-90.45,-1.29,.09,.075,0,17), l:[-90.45,-1.44]},
+  {n:'Española', p:blob(-89.68,-1.37,.1,.045,-.3,19), l:[-89.68,-1.5]},
+  {n:'Marchena', p:blob(-90.47,0.33,.08,.06,0,21), l:[-90.47,0.47]},
+  {n:'Pinta', p:blob(-90.75,0.58,.055,.075,0,23), l:[-90.6,0.62]},
+  {n:'Genovesa', p:blob(-89.96,0.32,.05,.035,0,25,24), l:[-89.96,0.43]},
+];
+const ALL = ISL.flatMap(i => i.p);
+const CEN = [-90.55,-0.55];
+function minDist(x, y){ let m = 1e9; for (const p of ALL){ const dx = p[0]-x, dy = p[1]-y, d = dx*dx+dy*dy; if (d < m) m = d; } return Math.sqrt(m); }
+function ringR(D, a){
+  const ux = Math.cos(a), uy = Math.sin(a); let r = 4;
+  while (r > 0 && minDist(CEN[0]+ux*r, CEN[1]+uy*r) > D) r -= .04;
+  let lo = r, hi = r + .04;
+  for (let i = 0; i < 10; i++){ const m = (lo+hi)/2; if (minDist(CEN[0]+ux*m, CEN[1]+uy*m) > D) hi = m; else lo = m; }
+  return (lo+hi)/2;
+}
+function ring(D, N = 120){ const out = []; for (let i = 0; i < N; i++){ const a = i/N*2*Math.PI, r = ringR(D, a); out.push([CEN[0]+Math.cos(a)*r, CEN[1]+Math.sin(a)*r]); } return chaikin(out, 2); }
+const RESERVE = ring(0.67);
+const BATHY = [0.1, 0.25, 0.42, 1.05].map(d => ring(d, 96));
+const at = (a, r) => [CEN[0]+Math.cos(a)*r, CEN[1]+Math.sin(a)*r];
+
+/* geometry the agent uses: point-in-polygon and signed distance to the reserve boundary (negative = inside) */
+function pip(p, poly){ let c = false; for (let i = 0, j = poly.length-1; i < poly.length; j = i++){ const [xi,yi] = poly[i], [xj,yj] = poly[j]; if (((yi > p[1]) !== (yj > p[1])) && (p[0] < (xj-xi)*(p[1]-yi)/(yj-yi) + xi)) c = !c; } return c; }
+function segDist(p, a, b){ const dx = b[0]-a[0], dy = b[1]-a[1], k = clamp(((p[0]-a[0])*dx + (p[1]-a[1])*dy)/(dx*dx + dy*dy || 1), 0, 1); return Math.hypot(p[0]-a[0]-k*dx, p[1]-a[1]-k*dy); }
+function sdist(p){ let m = 1e9; for (let i = 0; i < RESERVE.length; i++){ const d = segDist(p, RESERVE[i], RESERVE[(i+1)%RESERVE.length]); if (d < m) m = d; } return pip(p, RESERVE) ? -m : m; }
+const inView = p => p[0] > VIEW.lon0+.05 && p[0] < VIEW.lon1-.05 && p[1] > VIEW.lat0+.05 && p[1] < VIEW.lat1-.05;
+const bearing = (a, b) => (Math.round(Math.atan2(b[0]-a[0], b[1]-a[1])/DEG) + 360) % 360;
+const compass = d => ['north','northeast','east','southeast','south','southwest','west','northwest'][Math.round(d/45) % 8];
+const nearestIsland = p => { let best = null, bd = 1e9; ISL.forEach(i => { if (!i.n) return; const d = Math.min(...i.p.map(q => dist(q, p))); if (d < bd){ bd = d; best = i; } }); return best.n; };
+
+const KNOWN_GAPS = [
+  {n:'Itabaca Channel', c:[-90.2,-0.47], r:.05},
+  {n:'Isabela west coast', c:[-91.5,-0.72], r:.06},
+  {n:'Floreana lee', c:[-90.33,-1.18], r:.05},
+];
+const PORTS = [{n:'Puerto Ayora', p:[-90.31,-0.86]}, {n:'San Cristóbal', p:[-89.66,-1.02]}, {n:'Puerto Villamil', p:[-90.96,-1.05]}, {n:'Baltra', p:[-90.22,-0.37]}];
+const FISHN = ['SEA LANTERN 7','NORTH STAR 18','BLUE HORIZON 5','GOLDEN WAKE 12','SILVER TIDE 9','OCEAN PEARL 21','EASTERN CREST 3','FAR REACH 16','IRON GULL 4','NIGHT HERON 11'];
+const RVN = ['RV MERIDIAN','RV TIDELINE','RV SOUNDING','RV CALYPSO STAR'];
+const LOCALS = ['ISLA BRISA','LA GAVIOTA','MAR AZUL','SAN JUDAS','EL PIQUERO','DON TITO','ESTRELLA','LUNA MARINA','EL TIBURÓN','NAZCA','PELÍCANO','SOL DE MAR','CORMORÁN','LA FRAGATA'];
+
+/* ================= weights, tiers ================= */
+const BIAS = -4.0;
+const WTS = {gap:1.6, lic:.8, prior:.3, lights:1.1, radar:1.9};
+const TIERS = [[.75,'Patrol boat + commander','coral'], [.5,'Drone gets eyes on target','ally'], [.25,'Watch closely, free imagery first','amber'], [0,'Below watch level','ink']];
+const tierFor = p => TIERS.find(tr => p >= tr[0]);
+const DRONE_V = 100/60/60;   // 100 kn in degrees per sim minute
+const BUDGET = 1500, PAID = 900, SORTIES = 2;
+
+/* ================= world generation from a seed ================= */
+function genNight(seed){
+  const r = rng(seed*7919 + 13), rr = (a,b) => a + r()*(b-a), ri = (a,b) => Math.floor(rr(a, b+1));
+  const shuffle = a => { a = a.slice(); for (let i = a.length-1; i > 0; i--){ const j = Math.floor(r()*(i+1)); [a[i],a[j]] = [a[j],a[i]]; } return a; };
+  const W = {seed, vessels:[], patrols:[], drones:[]};
+  let id = 0; const add = v => { v.id = id++; W.vessels.push(v); return v; };
+  const seaPoint = (c, rad) => { for (let k = 0; k < 60; k++){ const a = rr(0, 6.28), d = Math.sqrt(r())*rad, p = [c[0] + Math.cos(a)*d, c[1] + Math.sin(a)*d]; if (minDist(p[0], p[1]) > .022) return p; } return [c[0], c[1] - rad]; };
+
+  const fleetA = rr(-150, -35)*DEG;
+  W.fleetA = fleetA;
+  const nFleet = ri(16, 24);
+  for (let i = 0; i < nFleet; i++){
+    const a = fleetA + rr(-.5, .5), b = at(a, ringR(.67, a) + rr(.1, .42));
+    if (!inView(b)) continue;
+    const w = rr(.04, .1), ph = rr(0, 6.28), am = rr(.006, .016);
+    add({kind:'fleet', name:`FLEET ${100 + i}`, type:'Fishing vessel', len:ri(40,60), licensed:false, prior:0, aisOn:() => true, pos: t => [b[0] + am*Math.cos(t*w+ph), b[1] + am*Math.sin(t*w*1.3+ph)]});
+  }
+  [[[-88.36,0.9],[-88.42,-2.7],.0035],[[-88.3,-2.42],[-89.7,-2.62],.003]].forEach(([A,B,v]) => { const s0 = r();
+    add({kind:'cargo', name:'CARGO', type:'Cargo', len:180, licensed:true, prior:0, aisOn:() => true, pos: t => { const k = (s0 + t*v) % 1; return [lerp(A[0],B[0],k), lerp(A[1],B[1],k)]; }}); });
+
+  const lnames = shuffle(LOCALS); let li = 0;
+  const LP = [[-90.31,-0.86],[-89.62,-0.98],[-90.96,-1.04],[-90.25,-0.36],[-90.47,-1.19],[-90.6,-0.42],[-91.25,-0.12]];
+  for (let i = 0; i < 9; i++){
+    const b = seaPoint(LP[i % LP.length], .13), w = rr(.05, .12), ph = rr(0, 6.28), am = rr(.006, .016);
+    add({kind:'local', name:lnames[li++], type:'Licensed local boat', len:ri(10,22), licensed:true, prior:0, aisOn:() => true, pos: t => [b[0] + am*Math.cos(t*w+ph), b[1] + am*Math.sin(t*w+ph)]});
+  }
+  const zones = shuffle(KNOWN_GAPS), nDec = ri(0, 2);
+  for (let i = 0; i < nDec; i++){
+    const z = zones[i], b = seaPoint(z.c, z.r*.8), off0 = rr(12, 38), offD = rr(6, 13);
+    add({kind:'local', decoy:true, name:lnames[li++], type:'Licensed local boat', len:ri(12,24), licensed:true, prior:ri(0,2), aisOn: t => !(t >= off0 && t < off0 + offD), pos: t => [b[0] + .004*Math.cos(t*.15), b[1] + .004*Math.sin(t*.15)]});
+  }
+
+  const innocent = r() < .3;
+  const type = innocent ? 'Research vessel' : (r() < .6 ? 'Squid jigger' : 'Longliner');
+  const sa = fleetA + rr(-.3, .3), R0 = ringR(.67, sa);
+  const S0 = at(sa, R0 + .075), SD = at(sa, R0 + .02), SF = at(sa + rr(-.04, .04), R0 - rr(.045, .09));
+  const tMove = rr(3, 6), tDark = rr(11, 16), tArr = tDark + rr(16, 22);
+  W.suspect = add({kind:'suspect', name: innocent ? RVN[ri(0, RVN.length-1)] : FISHN[ri(0, FISHN.length-1)], type, innocent, illegal: !innocent,
+    len: innocent ? ri(50,68) : type === 'Squid jigger' ? ri(44,62) : ri(36,54),
+    licensed:false, prior: innocent ? (r() < .7 ? 0 : 1) : ri(1,4), lights: type === 'Squid jigger' ? true : innocent ? r() < .5 : false,
+    aisOn: t => t < tDark,
+    pos: t => {
+      if (t < tMove) return [S0[0], S0[1]];
+      if (t < tDark){ const k = (t-tMove)/(tDark-tMove); return [lerp(S0[0],SD[0],k), lerp(S0[1],SD[1],k)]; }
+      if (t < tArr){ const k = ease((t-tDark)/(tArr-tDark)); return [lerp(SD[0],SF[0],k), lerp(SD[1],SF[1],k)]; }
+      const s = t - tArr; return [SF[0] + .006*Math.sin(s*.35), SF[1] + .005*(1-Math.cos(s*.35))];
+    }});
+
+  shuffle(PORTS).slice(0, 3).forEach((pt, i) => W.patrols.push({name:`PG-0${i+1}`, port:pt.n, home:pt.p, pos:[pt.p[0], pt.p[1]], kn:ri(22,30), hd:0,
+    status: r() < .28 ? (r() < .5 ? 'busy' : 'lowfuel') : 'ready', state:'home'}));
+  if (!W.patrols.some(p => p.status === 'ready')) W.patrols[0].status = 'ready';
+
+  const d1a = sa + rr(-.6, .6), d1 = at(d1a, ringR(.67, d1a) - .12);
+  const d2a = sa + rr(1.2, 2.2)*(r() < .5 ? 1 : -1); let d2 = at(d2a, ringR(.67, d2a) - .15); if (!inView(d2)) d2 = [-90.15,-0.28];
+  W.drones = [{name:'UAV-1', c:d1, status:'ready'}, {name:'UAV-2', c:d2, status: r() < .3 ? 'maintenance' : 'ready'}].map(d => ({...d, pos:[d.c[0], d.c[1]], state:'orbit', hd:0}));
+
+  W.freePass = tDark + rr(10, 32);
+  W.lightsDelay = rr(4, 8);
+  return W;
+}
+
+/* ================= state ================= */
+const S = {t:0, playing:true, speed:1, voice:false, lines:[], pShown:0};
+let W = null, A = null, NR = null;
+
+function startNight(seed){
+  W = genNight(seed); NR = rng(seed*31 + 7);
+  A = {fix:new Map(), tracks:new Map(), budget:0, sorties:0, pages:0, dismissed:0, main:null, nextFree:W.freePass, pass:null, paid:null, radarVis:null,
+       calls:[], decision:null, endT:null, flagged:new Set(), tickT:0, askAt:null, askTrack:null, etaVis:null, summaryShown:false};
+  S.t = 0; S.lines = []; S.pShown = 0; pings.length = 0;
+  try { speechSynthesis.cancel(); } catch (e) {}
+  $('feed').innerHTML = ''; $('lines').innerHTML = '';
+  ['dossier','call','decide','summary'].forEach(id => $(id).hidden = true);
+  $('sarWait').hidden = false; $('irWait').hidden = false; setPill('TRANSPONDER OFF', ''); $('sarCap').textContent = 'Radar'; $('irCap').textContent = 'Thermal · drone';
+  $('mDark').textContent = '0'; $('mDark').className = ''; $('mPages').textContent = '0';
+  $('mVessels').textContent = W.vessels.length; $('seedLbl').textContent = `Night #${seed}`;
+  renderRisk(null); updateGuards();
+  log('WATCH', `Night watch started. Tracking ${W.vessels.length} vessels by transponder in and around the Galápagos Marine Reserve.`, '', 0);
+  const nf = W.vessels.filter(v => v.kind === 'fleet').length;
+  A.fleetLogAt = 2;
+  A.fleetCount = nf;
+}
+
+/* ================= UI helpers ================= */
+const fmtClock = t => { const s = Math.floor(2*3600 + t*60); return [s/3600|0, (s/60|0)%60, s%60].map(n => String(n).padStart(2,'0')).join(':'); };
+const hm = t => fmtClock(t).slice(0,5);
+const fmtEta = min => `${Math.floor(min/60)} h ${String(Math.round(min)%60).padStart(2,'0')} min`;
+const nmTxt = d => `${(Math.abs(d)*NM).toFixed(1)} nm`;
+function log(tag, text, lvl = '', t = A ? A.now : 0){
+  const li = document.createElement('li'); if (lvl) li.className = lvl;
+  li.innerHTML = `<span class="ts">${hm(t)}</span><span class="tag">${tag}</span><p></p>`;
+  li.querySelector('p').textContent = text;
+  $('feed').prepend(li);
+}
+function setPill(txt, cls){ const p = $('dosPill'); p.textContent = txt; p.className = 'pill' + (cls ? ' ' + cls : ''); }
+function updateGuards(){
+  $('gSupp').textContent = A ? A.dismissed : 0; $('gSpend').textContent = `$${A ? A.budget : 0}`;
+  $('gSort').textContent = `${A ? A.sorties : 0}/${SORTIES}`; $('gPage').textContent = A ? A.pages : 0; $('mPages').textContent = A ? A.pages : 0;
+}
+function say(text, who){
+  if (!S.voice || !('speechSynthesis' in window)) return;
+  try {
+    const u = new SpeechSynthesisUtterance(text), vs = speechSynthesis.getVoices().filter(v => /^en/i.test(v.lang));
+    if (vs.length) u.voice = who === 'agent' ? vs[0] : (vs.find(v => v !== vs[0] && /male|daniel|fred|alex|google uk/i.test(v.name)) || vs[1] || vs[0]);
+    u.rate = 1.06; u.pitch = who === 'agent' ? 1.05 : .85; speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+/* ================= risk model ================= */
+function featRows(tr){
+  const v = tr ? tr.v : null;
+  const dk = tr && tr.droneKind;
+  return [
+    {k:'gap', n:'Transponder off near boundary', w:WTS.gap},
+    {k:'lic', n:'No reserve fishing license', w:WTS.lic},
+    {k:'prior', n:'Earlier gaps in 90 days', w:WTS.prior},
+    {k:'lights', n:'Night lights match squid fishing', w:WTS.lights},
+    {k:'radar', n:'Radar hull inside, no transponder', w:WTS.radar},
+    {k:'drone', n: dk === 'research' ? 'Drone sees research ship, no gear' : dk === 'gear' ? 'Drone sees fishing gear' : 'Drone visual check', w: dk === 'research' ? -3.0 : 1.5},
+  ];
+}
+function score(tr){
+  let z = BIAS;
+  featRows(tr).forEach(f => { if (tr.obs.has(f.k)) z += f.w*(tr.feats[f.k] || 0); });
+  tr.z = z; tr.p = SIG(z);
+}
+const fx = v => (v < 0 ? '−' : '') + Math.abs(v).toFixed(1);
+function renderRisk(tr){
+  const rows = featRows(tr);
+  $('factors').innerHTML = rows.map(f => {
+    const on = tr && tr.obs.has(f.k), x = on ? (tr.feats[f.k] || 0) : 0, c = f.w*x;
+    const w = Math.min(100, Math.abs(c)/1.9*100);
+    return `<li class="${on ? (c === 0 ? 'zero' : '') : 'pending'}"><span>${f.n}<small>${f.w} × ${on ? x : '?'}</small></span><span class="bar"><i style="width:${w}%;${c < 0 ? 'background:var(--ok)' : ''}"></i></span><em>${on ? (c < 0 ? '−' : '+') + Math.abs(c).toFixed(1) : '…'}</em></li>`;
+  }).join('');
+  if (!tr){ $('math').innerHTML = ''; return; }
+  const parts = rows.filter(f => tr.obs.has(f.k) && (tr.feats[f.k] || 0) !== 0).map(f => { const c = f.w*tr.feats[f.k]; return (c < 0 ? '− ' : '+ ') + Math.abs(c).toFixed(1); });
+  $('math').innerHTML = `z = ${fx(BIAS)} ${parts.join(' ')} = <b>${fx(tr.z)}</b><br>p = 1 / (1 + e<sup>${fx(-tr.z)}</sup>) = <b>${tr.p.toFixed(2)}</b>`;
+}
+function showDossier(tr){
+  const v = tr.v;
+  $('dossier').hidden = false;
+  $('dosName').textContent = v.name;
+  $('dosTrack').textContent = `Target dossier · Track T-${String(W.seed % 10000).padStart(4,'0')}`;
+  $('dosType').textContent = `${v.type}, ${v.len} m`;
+  $('dosLic').textContent = v.type === 'Research vessel' ? 'Research permit, no fishing license' : (v.licensed ? 'Licensed' : 'None on record');
+  $('dosLic').className = v.licensed ? '' : 'bad';
+  $('dosFix').textContent = `${hm(tr.fix.t)}, ${nmTxt(tr.sd)} ${tr.sd > 0 ? 'outside' : 'inside'}`;
+}
+
+/* ================= the agent ================= */
+function predict(tr, t){
+  if (tr.conf) return {p: tr.conf.p, r: .015};
+  const dt = Math.min(t - tr.fix.t, 25);
+  return {p: [tr.fix.p[0] + tr.fix.v[0]*dt*.6, tr.fix.p[1] + tr.fix.v[1]*dt*.6], r: Math.min(.14, .02 + .0028*(t - tr.fix.t))};
+}
+function step(t){
+  A.now = t;
+  if (A.fleetLogAt !== null && t >= A.fleetLogAt){ A.fleetLogAt = null; log('WATCH', `Distant-water fishing fleet holding outside the ${compass(bearing(CEN, at(W.fleetA, 1)))} boundary: ${A.fleetCount} vessels, transponders on, in legal waters. No action needed.`); }
+
+  // 1. ingest transponder reports
+  for (const v of W.vessels){
+    if (!v.aisOn(t)) continue;
+    const p = v.pos(t), q = v.pos(t - 1);
+    A.fix.set(v.id, {t, p, v:[p[0]-q[0], p[1]-q[1]]});
+    const tr = A.tracks.get(v.id);
+    if (tr && !tr.back){ tr.back = true; if (tr.status === 'dismissed') log('DETECT', `${v.name} transponder back on after ${Math.round(t - tr.since)} min, as expected for that reception gap.`, 'ok'); }
+    // approach watch: closing on the boundary from outside
+    if ((v.kind === 'fleet' || v.kind === 'suspect') && !A.flagged.has(v.id)){
+      const sd = sdist(p);
+      if (sd > 0 && sd < .12){ const sd0 = sdist(q); if (sd < sd0 - .002){
+        A.flagged.add(v.id); const kn = Math.round(Math.hypot(p[0]-q[0], p[1]-q[1])*NM*60);
+        log('WATCH', `${v.name} left the fleet, heading ${String(bearing(q, p)).padStart(3,'0')}° toward the boundary at ${kn} kn, ${nmTxt(sd)} out. Watching it closely.`, 'warn'); ping(p, C.amber, t);
+      } }
+    }
+  }
+  // 2. gap detection
+  for (const v of W.vessels){
+    const f = A.fix.get(v.id); if (!f || A.tracks.has(v.id)) continue;
+    if (t - f.t >= 3) openTrack(v, f, t);
+  }
+  // 3. scheduled sensors
+  for (const tr of A.tracks.values()){
+    if (tr.status !== 'open') continue;
+    if (t >= tr.lightsAt && !tr.obs.has('lights')) lightsCheck(tr, t);
+  }
+  if (!A.pass && A.endT === null && t >= A.nextFree){ A.pass = {t0:t, dets:detect(t, null), snap:snapAIS(t), label:'Sentinel-1 pass'}; log('VERIFY', 'Free Sentinel-1 radar pass started over the reserve. Every radar return will be matched to a transponder position.'); }
+  if (A.pass && t >= A.pass.t0 + 6){ processRadar(A.pass, t); A.radarVis = {dets:A.pass.dets, until:t + 5}; A.pass = null; A.nextFree += 35; }
+  if (A.paid && t >= A.paid.due){ const ps = {t0:t, dets:detect(t, A.paid), snap:snapAIS(t), label:'Commercial image'}; processRadar(ps, t); A.radarVis = {dets:ps.dets, until:t + 5, area:A.paid}; A.paid = null; }
+  // 4. drones and patrol boats move
+  moveAssets(t);
+  // 5. decide
+  for (const tr of A.tracks.values()) if (tr.status === 'open') policy(tr, t);
+  // 6. call lines
+  A.calls = A.calls.filter(c => { if (t >= c.t){ callLine(c.who, typeof c.text === 'function' ? c.text() : c.text, c.title); if (c.after) c.after(t); return false; } return true; });
+  updateGuards();
+}
+function openTrack(v, f, t){
+  const sd = sdist(f.p), zone = KNOWN_GAPS.find(z => dist(f.p, z.c) < z.r + .015);
+  const tr = {v, since:f.t, fix:f, sd, feats:{}, obs:new Set(), p:0, z:0, status:'open', lightsAt: t + W.lightsDelay};
+  A.tracks.set(v.id, tr);
+  const where = `${nmTxt(sd)} ${sd > 0 ? 'outside' : 'inside'} the boundary`;
+  if (zone && v.licensed){
+    tr.status = 'dismissed'; tr.zone = zone; tr.feats = {gap:0, lic:0, prior:v.prior}; ['gap','lic','prior'].forEach(k => tr.obs.add(k)); score(tr);
+    A.dismissed++;
+    log('DETECT', `${v.name} transponder went silent. Licensed local boat inside a known reception gap (${zone.n}). Risk ${tr.p.toFixed(2)}. Dismissed with no human paged.`, 'ok');
+    ping(f.p, C.ok, t); return;
+  }
+  const headingIn = sdist([f.p[0] + f.v[0], f.p[1] + f.v[1]]) < sd;
+  tr.feats = {gap: sd < 5/NM ? 1 : 0, lic: v.licensed ? 0 : 1, prior: v.prior}; ['gap','lic','prior'].forEach(k => tr.obs.add(k)); score(tr);
+  if (!A.main){ A.main = tr; showDossier(tr); }
+  log('DETECT', `${v.name} transponder went silent ${where}${headingIn ? ' while heading in' : ''}. Registry: ${v.type.toLowerCase()}, ${v.len} m, ${v.licensed ? 'licensed' : 'no reserve fishing license'}, ${v.prior} earlier gap${v.prior === 1 ? '' : 's'} in 90 days. Risk ${tr.p.toFixed(2)}, ${tierFor(tr.p)[1].toLowerCase()}.`, 'crit');
+  ping(f.p, C.coral, t);
+}
+function lightsCheck(tr, t){
+  const pr = predict(tr, t), vp = tr.v.pos(t), seen = tr.v.lights && dist(vp, pr.p) < pr.r + .03;
+  tr.feats.lights = seen ? 1 : 0; tr.obs.add('lights'); score(tr);
+  if (seen){ tr.lightPos = vp; log('VERIFY', `VIIRS night-light satellite sees bright lights ${nmTxt(dist(vp, tr.fix.p))} from ${tr.v.name}'s last fix, consistent with night fishing. Risk now ${tr.p.toFixed(2)}.`, 'warn'); ping(vp, C.amber, t); }
+  else log('VERIFY', `VIIRS night-light pass shows no bright lights near ${tr.v.name}'s estimated position. Risk stays ${tr.p.toFixed(2)}.`);
+}
+function detect(t, area){
+  const dets = [];
+  for (const v of W.vessels){
+    const p = v.pos(t);
+    if (!inView(p) || (area && dist(p, area.c) > area.r)) continue;
+    if (NR() < (v.len >= 30 ? .99 : .9)) dets.push({p:[p[0] + (NR()-.5)*.008, p[1] + (NR()-.5)*.008], len: Math.round(v.len + (NR()-.5)*6)});
+  }
+  return dets;
+}
+function snapAIS(t){ const out = []; A.fix.forEach(f => { if (t - f.t < 1) out.push(f.p); }); return out; }
+function processRadar(ps, t){
+  const unmatched = [];
+  for (const d of ps.dets){ d.matched = ps.snap.some(s => dist(s, d.p) < .015); if (!d.matched) unmatched.push(d); }
+  let gapMatches = 0;
+  for (const tr of A.tracks.values()){
+    if (tr.back) continue;
+    if (tr.status === 'dismissed'){ const d = unmatched.find(u => !u.track && dist(u.p, tr.fix.p) < .03); if (d){ d.track = tr; d.gap = true; gapMatches++; } continue; }
+    if (tr.status !== 'open' || tr.radarDone) continue;
+    const pr = predict(tr, ps.t0); let best = null, bd = Math.max(pr.r*1.3, .03);
+    for (const d of unmatched){ if (d.track) continue; const dd = dist(d.p, pr.p); if (dd < bd){ bd = dd; best = d; } }
+    if (!best){ log('VERIFY', `${ps.label}: no unmatched hull near ${tr.v.name}'s estimated position. Search stays open.`, 'warn'); continue; }
+    best.track = tr; best.hit = true;
+    const sd = sdist(best.p);
+    tr.feats.radar = sd < 0 ? 1 : 0; tr.obs.add('radar'); tr.hull = best.len;
+    if (!tr.conf) tr.conf = {t, p:best.p};
+    if (sd < 0) tr.radarDone = true; else A.nextFree = t + 10;
+    score(tr);
+    log('VERIFY', `${ps.label}: radar return with no transponder match, ${nmTxt(sd)} ${sd < 0 ? 'inside' : 'outside'} the reserve. Hull about ${best.len} m, consistent with ${tr.v.name} (${tr.v.len} m registered). Risk now ${tr.p.toFixed(2)}.`, 'crit');
+    ping(best.p, C.coral, t);
+    if (tr === A.main){ drawSAR(best.len); $('sarWait').hidden = true; $('sarCap').textContent = `Radar · ${ps.label === 'Commercial image' ? 'commercial' : 'Sentinel-1'}`; if (!tr.droneKind) setPill(sd < 0 ? 'CONFIRMED INSIDE' : 'SEEN OUTSIDE', 'crit'); }
+  }
+  log('VERIFY', `${ps.label} processed: ${ps.dets.length} radar returns, ${ps.dets.filter(d => d.matched).length} matched to transponders${gapMatches ? `, ${gapMatches} matched to dismissed boats in reception gaps` : ''}.`);
+}
+function policy(tr, t){
+  const p = tr.p, v = tr.v;
+  // imagery planner: free pass vs paid tasking
+  if (!tr.radarDone && !tr.droneKind && !A.paid && !A.pass && p >= .25){
+    const wait = A.nextFree - t, pr = predict(tr, t);
+    if (wait > 12 && p >= .5 && A.budget + PAID <= BUDGET){
+      A.budget += PAID; A.paid = {due:t + 4, c:pr.p, r:pr.r + .05}; tr.planned = 'paid';
+      log('VERIFY', `Free radar pass is ${Math.round(wait)} min away and risk is ${p.toFixed(2)}. Buying commercial radar imagery for $${PAID} ($${A.budget} of $${BUDGET} budget used).`, 'warn');
+    } else if (!tr.planned){
+      tr.planned = 'free';
+      log('VERIFY', wait > 12 ? `Free Sentinel-1 radar pass in ${Math.round(wait)} min. Paid imagery ($${PAID}) only if risk passes 0.50 first.` : `Free Sentinel-1 radar pass in ${Math.round(wait)} min, close enough that paid imagery isn't worth $${PAID}.`);
+    }
+  }
+  // drone tier
+  if (p >= .5 && !tr.drone && !tr.droneKind && !tr.noDrone){
+    const pr = predict(tr, t);
+    const rows = W.drones.map(d => ({d, eta: d.status === 'ready' && d.state === 'orbit' ? dist(d.pos, pr.p)/DRONE_V : null}));
+    const ok = rows.filter(x => x.eta !== null).sort((a,b) => a.eta - b.eta);
+    if (!ok.length || A.sorties >= SORTIES){ tr.noDrone = true; log('DISPATCH', 'Risk is in drone range, but no drone is available. Relying on radar.', 'warn'); }
+    else {
+      const c = ok[0]; c.d.state = 'enroute'; c.d.track = tr; tr.drone = c.d; A.sorties++;
+      const others = rows.filter(x => x !== c).map(x => x.eta === null ? `${x.d.name} is in maintenance` : `${x.d.name} would take ${Math.round(x.eta)} min`).join('; ');
+      log('DISPATCH', `Risk ${p.toFixed(2)} passes the 0.50 drone line. Sent ${c.d.name}, ${Math.round(c.eta)} min away${others ? ` (${others})` : ''}. A drone flight is cheap and can be called back, so no human is needed yet.`);
+    }
+  }
+  // drone observation
+  if (tr.obsAt && t >= tr.obsAt && !tr.droneKind){
+    tr.droneKind = v.illegal ? 'gear' : 'research'; tr.feats.drone = 1; tr.obs.add('drone'); score(tr);
+    if (tr === A.main){ drawIR(tr.droneKind, v.type); $('irWait').hidden = true; $('irCap').textContent = `Thermal · ${tr.drone.name}`; setPill(tr.droneKind === 'gear' ? 'FISHING GEAR SEEN' : 'RESEARCH SHIP', tr.droneKind === 'gear' ? 'crit' : 'ok'); }
+    log('DISPATCH', tr.droneKind === 'gear'
+      ? `${tr.drone.name} thermal camera shows ${v.type === 'Squid jigger' ? 'jigging lines and lamps over the side' : 'longline gear in the water'} and crew working on deck. Risk now ${tr.p.toFixed(2)}.`
+      : `${tr.drone.name} sees ${v.name}, a research ship with survey gear and no fishing lines in the water. Risk drops to ${tr.p.toFixed(2)}.`, tr.droneKind === 'gear' ? 'crit' : 'ok');
+  }
+  // patrol tier: fastest available boat only
+  if (tr.p >= .75 && !tr.patrol){
+    const tp = predict(tr, t).p;
+    const rows = W.patrols.map(b => ({b, eta: dist(b.pos, tp)*NM/b.kn*60}));
+    const ready = rows.filter(x => x.b.status === 'ready' && x.b.state === 'home').sort((a,b) => a.eta - b.eta);
+    if (ready.length){
+      const w = ready[0]; tr.patrol = w.b; w.b.state = 'called'; w.b.track = tr; A.etaVis = {t, rows, win:w.b, tp};
+      const desc = rows.sort((a,b) => a.eta - b.eta).map(x => `${x.b.name} (${x.b.kn} kn) ${x.b.status === 'ready' ? fmtEta(x.eta) : x.b.status === 'busy' ? 'busy on another job' : 'low on fuel'}`).join(', ');
+      log('DISPATCH', `Risk ${tr.p.toFixed(2)} passes the 0.75 patrol line. Options: ${desc}. Calling ${w.b.name} only.`);
+      startCall(tr, w.b, t);
+    }
+  }
+  // escalate for boarding
+  if (tr.patrol && !tr.escalated && tr.patrol.state !== 'returning' && (tr.droneKind === 'gear' || (tr.noDrone && tr.radarDone))){
+    tr.escalated = t; A.pages++; A.askAt = t + 1.5; A.askTrack = tr;
+    log('ESCALATE', `Evidence package sent to the duty commander: track, ${tr.radarDone ? 'radar, ' : ''}${tr.obs.has('lights') && tr.feats.lights ? 'night lights, ' : ''}${tr.droneKind ? 'thermal video, ' : ''}registry check. Boarding needs a human decision.`, 'warn');
+  }
+  // innocent: stand down and close
+  if (tr.droneKind === 'research' && tr.p < .5){
+    if (tr.patrol && tr.patrol.state !== 'returning') standDown(tr, t);
+    tr.status = 'closed'; tr.closedT = t; A.endT = t;
+    log('SCORE', `Risk ${tr.p.toFixed(2)}. ${v.name} is a research ship with a broken transponder. Case closed with no boarding${tr.patrol ? '' : ' and no human paged'}. Logged for a registry follow-up.`, 'ok');
+  }
+}
+function startCall(tr, b, t){
+  const v = tr.v, title = `${b.name} bridge, ${b.port}`;
+  const tp = predict(tr, t).p;
+  A.calls.push(
+    {t:t + .5, who:'agent', title, text:`${b.name}, this is Tidewatch. Dark vessel inside the reserve, ${compass(bearing(b.home, tp))} of you near ${nearestIsland(tp)}. Position is on your plotter.`},
+    {t:t + 5.5, who:'capt', title, text:'Copy, Tidewatch. How sure are you?'},
+    {t:t + 8.5, who:'agent', title, text:() => {
+      const bits = [];
+      if (tr.hull) bits.push(`radar shows a ${tr.hull} meter hull with its transponder off`);
+      if (tr.feats.lights) bits.push('its lights match night fishing');
+      const d = tr.droneKind === 'gear' ? 'Our drone already sees fishing gear in the water.' : tr.drone ? `${tr.drone.name} will have eyes on it shortly.` : 'No drone is free, so you will be first on scene.';
+      return `${bits.length ? bits.join(', and ').replace(/^./, c => c.toUpperCase()) + '. ' : ''}Risk is ${tr.p.toFixed(2)}. ${d}`;
+    }},
+    {t:t + 14, who:'capt', title, text:'Understood. Getting underway now.', after: tt => { if (b.state === 'called') b.state = 'enroute'; log('DISPATCH', `${b.name} underway at ${b.kn} kn. Intercept in about ${fmtEta(dist(b.pos, predict(tr, tt).p)*NM/b.kn*60)}.`); }}
+  );
+}
+function standDown(tr, t){
+  const b = tr.patrol, title = `${b.name} bridge, ${b.port}`;
+  b.state = 'returning';
+  A.calls = A.calls.filter(c => c.title !== title);
+  A.calls.push(
+    {t:t + .5, who:'agent', title, text:`${b.name}, Tidewatch again. Our drone identified the vessel as ${tr.v.name}, a research ship with no fishing gear. Standing you down. Return to station.`},
+    {t:t + 5, who:'capt', title, text:'Copy. Returning to station.'}
+  );
+  log('DISPATCH', `Standing ${b.name} down. Saved the rest of the trip and nobody boards an innocent ship.`, 'ok');
+}
+function moveAssets(t){
+  for (const d of W.drones){
+    if (d.state === 'orbit'){ d.pos = [d.c[0] + .035*Math.cos(t*.7), d.c[1] + .035*Math.sin(t*.7)]; d.hd = t*.7 + Math.PI/2; continue; }
+    const tr = d.track, vp = tr.v.pos(t);
+    if (d.state === 'enroute'){
+      const pr = predict(tr, t), tgt = dist(d.pos, vp) < .1 ? vp : pr.p, dd = dist(d.pos, tgt), s = DRONE_V*TICK;
+      const nx = dd < s ? tgt : [d.pos[0] + (tgt[0]-d.pos[0])/dd*s, d.pos[1] + (tgt[1]-d.pos[1])/dd*s];
+      d.hd = Math.atan2(-(nx[1]-d.pos[1]), nx[0]-d.pos[0]); d.pos = nx;
+      if (dist(d.pos, vp) < .012){ d.state = 'onstation'; tr.obsAt = t + 1.2; tr.conf = {t, p:vp};
+        log('DISPATCH', `${d.name} on station over the target, ${nmTxt(sdist(vp))} ${sdist(vp) < 0 ? 'inside' : 'outside'} the reserve.`); ping(vp, C.ally, t); }
+    } else if (d.state === 'onstation'){
+      d.pos = [vp[0] + .025*Math.cos(t*.8), vp[1] + .025*Math.sin(t*.8)]; d.hd = t*.8 + Math.PI/2; tr.conf = {t, p:vp};
+    }
+  }
+  for (const b of W.patrols){
+    if (b.state !== 'enroute' && b.state !== 'returning') continue;
+    const tgt = b.state === 'enroute' ? b.track.v.pos(t) : b.home, dd = dist(b.pos, tgt), s = b.kn/3600*TICK;
+    if (dd < .02){ if (b.state === 'returning'){ b.pos = [b.home[0], b.home[1]]; b.state = 'home'; } continue; }
+    const nx = [b.pos[0] + (tgt[0]-b.pos[0])/dd*s, b.pos[1] + (tgt[1]-b.pos[1])/dd*s];
+    b.hd = Math.atan2(-(nx[1]-b.pos[1]), nx[0]-b.pos[0]); b.pos = nx;
+  }
+}
+function decide(board){
+  if (A.decision || !A.askTrack) return;
+  A.decision = {t:S.t, board}; A.endT = S.t; $('decide').hidden = true;
+  A.now = S.t;
+  log('HUMAN', board ? `Boarding authorized by the duty commander. ${A.askTrack.drone ? A.askTrack.drone.name + ' stays on the target' : 'Radar keeps tracking'} until ${A.askTrack.patrol.name} arrives.` : `Commander chose to keep shadowing. ${A.askTrack.patrol.name} holds nearby and the drone keeps watching.`, 'ok');
+}
+$('bBoard').onclick = () => decide(true);
+$('bShadow').onclick = () => decide(false);
+
+function callLine(who, text, title){
+  $('call').hidden = false; $('callTitle').textContent = title;
+  if (A.callTitle !== title){ A.callTitle = title; A.callStart = A.now; }
+  const li = document.createElement('li'); li.className = who;
+  li.innerHTML = `<b>${who === 'agent' ? 'TIDEWATCH' : 'CAPTAIN'}</b><span></span>`;
+  li.querySelector('span').textContent = text;
+  $('lines').append(li); while ($('lines').children.length > 4) $('lines').firstChild.remove();
+  S.lines.push({t:S.t, dur:text.length*.06, who}); say(text, who);
+}
+
+/* ================= canvas ================= */
+const cv = $('map'), ctx = cv.getContext('2d');
+let CW = 0, CH = 0, sc = 1, ox = 0, oy = 0, DPR = 1;
+function resize(){
+  const r = cv.getBoundingClientRect(); DPR = Math.min(2, window.devicePixelRatio || 1);
+  CW = r.width; CH = r.height; cv.width = Math.round(CW*DPR); cv.height = Math.round(CH*DPR);
+  const lonR = VIEW.lon1-VIEW.lon0, latR = VIEW.lat1-VIEW.lat0;
+  sc = Math.min(CW/lonR, CH/latR); ox = (CW - lonR*sc)/2; oy = (CH - latR*sc)/2;
+  const w = $('wave'); w.width = (w.getBoundingClientRect().width || 300)*DPR; w.height = 34*DPR;
+}
+const P = (lon, lat) => [ox + (lon-VIEW.lon0)*sc, oy + (VIEW.lat1-lat)*sc];
+const PX = d => d*sc;
+function poly(pts){ ctx.beginPath(); pts.forEach((p,i) => { const [x,y] = P(p[0],p[1]); i ? ctx.lineTo(x,y) : ctx.moveTo(x,y); }); ctx.closePath(); }
+function label(txt, x, y, col, size = 10, align = 'left', font = 'mono'){
+  ctx.font = `${font === 'mono' ? 500 : 600} ${size}px ${font === 'mono' ? FMONO : FDISP}`;
+  ctx.textAlign = align; ctx.fillStyle = col; ctx.fillText(txt, x, y);
+}
+function heading(f, t){ const a = f(t-.4), b = f(t+.4); const [ax,ay] = P(a[0],a[1]), [bx,by] = P(b[0],b[1]); return Math.atan2(by-ay, bx-ax); }
+function boat(x, y, ang, col, s = 5, fill = true){
+  ctx.save(); ctx.translate(x,y); ctx.rotate(ang);
+  ctx.beginPath(); ctx.moveTo(s*1.4,0); ctx.lineTo(-s,-s*.75); ctx.lineTo(-s*.5,0); ctx.lineTo(-s,s*.75); ctx.closePath();
+  if (fill){ ctx.fillStyle = col; ctx.fill(); } else { ctx.strokeStyle = col; ctx.lineWidth = 1.3; ctx.stroke(); }
+  ctx.restore();
+}
+function trail(f, t, col, n = 8, step = .9){
+  ctx.beginPath();
+  for (let k = 0; k <= n; k++){ const p = f(Math.max(0, t - k*step)), [x,y] = P(p[0],p[1]); k ? ctx.lineTo(x,y) : ctx.moveTo(x,y); }
+  ctx.strokeStyle = rgba(col,.28); ctx.lineWidth = 1; ctx.stroke();
+}
+const pings = [];
+function ping(lonlat, col, t0){ pings.push({p:lonlat, col, t0}); }
+function brackets(x, y, r, col){
+  ctx.strokeStyle = col; ctx.lineWidth = 1.5; const k = r*.45;
+  [[-1,-1],[1,-1],[1,1],[-1,1]].forEach(([sx,sy]) => { ctx.beginPath(); ctx.moveTo(x+sx*r, y+sy*(r-k)); ctx.lineTo(x+sx*r, y+sy*r); ctx.lineTo(x+sx*(r-k), y+sy*r); ctx.stroke(); });
+}
+function dashLine(a, b, col, w = 1.2, dash = [2,4]){ const [ax,ay] = P(a[0],a[1]), [bx,by] = P(b[0],b[1]); ctx.setLineDash(dash); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke(); ctx.setLineDash([]); }
+
+function draw(t){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  const g = ctx.createRadialGradient(CW*.5, CH*.45, 10, CW*.5, CH*.5, Math.max(CW,CH)*.75);
+  g.addColorStop(0, '#0b2530'); g.addColorStop(1, C.abyss);
+  ctx.fillStyle = g; ctx.fillRect(0,0,CW,CH);
+  const lonA = VIEW.lon0 - ox/sc, lonB = VIEW.lon1 + ox/sc, latB = VIEW.lat1 + oy/sc, latA = VIEW.lat0 - oy/sc;
+  ctx.lineWidth = 1; ctx.strokeStyle = rgba(C.ink, .045);
+  for (let lo = Math.ceil(lonA*4)/4; lo <= lonB; lo += .25){ const [x] = P(lo,0); ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,CH); ctx.stroke();
+    if (Math.abs(lo*2 - Math.round(lo*2)) < 1e-6) label(`${Math.abs(lo).toFixed(1)}°W`, x+3, 14, rgba(C.ink,.3), 9); }
+  for (let la = Math.ceil(latA*4)/4; la <= latB; la += .25){ const [,y] = P(0,la); ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(CW,y); ctx.stroke();
+    if (Math.abs(la*2 - Math.round(la*2)) < 1e-6) label(la === 0 ? 'EQUATOR' : `${Math.abs(la).toFixed(1)}°${la < 0 ? 'S' : 'N'}`, CW-6, y-3, rgba(C.ink,.3), 9, 'right'); }
+  BATHY.forEach((r,i) => { poly(r); ctx.strokeStyle = rgba(C.seaglass, i === 3 ? .05 : .07); ctx.lineWidth = 1; ctx.stroke(); });
+  poly(RESERVE); ctx.fillStyle = rgba(C.seaglass, .035); ctx.fill();
+  ctx.setLineDash([7,5]); ctx.strokeStyle = rgba(C.seaglass, .75); ctx.lineWidth = 1.4; ctx.stroke(); ctx.setLineDash([]);
+  { const a = W.fleetA + .55, p = at(a, ringR(.67, a) + .05), [x,y] = P(p[0],p[1]); label('RESERVE BOUNDARY · 40 NM', x, y+12, rgba(C.seaglass,.85), 10, 'center'); }
+  ISL.forEach(i => { poly(i.p); ctx.fillStyle = C.land; ctx.fill(); ctx.strokeStyle = C['land-edge']; ctx.lineWidth = 1; ctx.stroke(); });
+  ISL.forEach(i => { if (!i.n) return; const [x,y] = P(i.l[0], i.l[1]); label(i.n.toUpperCase(), x, y, rgba(C.ink,.55), 13, 'center', 'display'); });
+  // known reception gaps (agent knowledge)
+  KNOWN_GAPS.forEach(z => { const [x,y] = P(z.c[0], z.c[1]); ctx.setLineDash([2,4]); ctx.strokeStyle = rgba(C.ink, .22); ctx.beginPath(); ctx.arc(x, y, PX(z.r), 0, 7); ctx.stroke(); ctx.setLineDash([]); });
+  // ports
+  PORTS.forEach(pt => { const [x,y] = P(pt.p[0], pt.p[1]); ctx.fillStyle = rgba(C.ally,.55); ctx.fillRect(x-2,y-2,4,4); label(pt.n.toUpperCase(), x+7, y+12, rgba(C.ally,.55), 9); });
+
+  // radar sweep (free pass)
+  if (A.pass){
+    const k = clamp((t - A.pass.t0)/6, 0, 1), lat = lerp(latB, latA, k), [,y] = P(0, lat), h = PX(.32);
+    const sg = ctx.createLinearGradient(0, y-h, 0, y); sg.addColorStop(0, rgba(C.seaglass, 0)); sg.addColorStop(1, rgba(C.seaglass, .16));
+    ctx.fillStyle = sg; ctx.fillRect(0, y-h, CW, h);
+    ctx.strokeStyle = rgba(C.seaglass, .8); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(CW,y); ctx.stroke();
+    label('SENTINEL-1 RADAR PASS', 12, y-6, rgba(C.seaglass, .9), 10);
+    A.pass.dets.forEach(d => { if (d.p[1] < lat) return; const [dx,dy] = P(d.p[0], d.p[1]); ctx.strokeStyle = rgba(C.seaglass, .55); ctx.lineWidth = 1; ctx.strokeRect(dx-5, dy-5, 10, 10); });
+  }
+  if (A.paid){ const [x,y] = P(A.paid.c[0], A.paid.c[1]); ctx.setLineDash([5,4]); ctx.strokeStyle = rgba(C.amber, .8); ctx.beginPath(); ctx.arc(x,y,PX(A.paid.r),0,7); ctx.stroke(); ctx.setLineDash([]); label(`COMMERCIAL RADAR · DUE ${hm(A.paid.due)}`, x, y - PX(A.paid.r) - 6, C.amber, 10, 'center'); }
+  if (A.radarVis && t < A.radarVis.until){
+    const a = Math.min(1, A.radarVis.until - t);
+    A.radarVis.dets.forEach(d => { const [dx,dy] = P(d.p[0], d.p[1]); ctx.lineWidth = d.hit ? 1.6 : 1; ctx.strokeStyle = d.matched ? rgba(C.ok, .6*a) : d.gap ? rgba(C.ok, .9*a) : rgba(C.coral, .95*a); ctx.strokeRect(dx-6, dy-6, 12, 12); });
+  }
+
+  // ETA comparison
+  if (A.etaVis && t < A.etaVis.t + 6){
+    const e = A.etaVis, a = Math.min(1, (t - e.t)*2, e.t + 6 - t), [fx2,fy2] = P(e.tp[0], e.tp[1]);
+    e.rows.forEach(x => {
+      const win = x.b === e.win, [hx,hy] = P(x.b.home[0], x.b.home[1]);
+      ctx.setLineDash(win ? [] : [4,5]); ctx.strokeStyle = win ? rgba(C.ally, .9*a) : rgba(C['ink-2'], .5*a); ctx.lineWidth = win ? 2 : 1.2;
+      ctx.beginPath(); ctx.moveTo(hx,hy); ctx.lineTo(fx2,fy2); ctx.stroke(); ctx.setLineDash([]);
+      const txt = `${x.b.name} · ${x.b.status === 'ready' ? fmtEta(x.eta) : x.b.status === 'busy' ? 'BUSY' : 'LOW FUEL'}${win ? ' · FASTEST' : ''}`;
+      label(txt, hx + (fx2 > hx ? -10 : 10), hy + 26, win ? rgba(C.ally, a) : rgba(C['ink-2'], .8*a), 11, fx2 > hx ? 'right' : 'left');
+    });
+  }
+
+  // vessels reporting by transponder
+  for (const v of W.vessels){
+    if (!v.aisOn(t)) continue;
+    const p = v.pos(t), [x,y] = P(p[0],p[1]);
+    if (v.kind === 'fleet' || v.kind === 'suspect'){
+      const flag = A.flagged.has(v.id);
+      trail(v.pos, t, flag ? C.amber : C['ink-2'], flag ? 8 : 5, flag ? .9 : 1.5);
+      boat(x, y, heading(v.pos, t), flag ? C.amber : rgba(C['ink-2'], .85), flag ? 5 : 4);
+      if (flag){ ctx.strokeStyle = rgba(C.amber,.6); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(x,y,11,0,7); ctx.stroke(); label(v.name, x+15, y+4, C.amber, 11); }
+    } else if (v.kind === 'cargo'){ trail(v.pos, t, C['ink-2'], 8, 2); boat(x, y, heading(v.pos,t), rgba(C['ink-2'], .6), 6, false); }
+    else boat(x, y, heading(v.pos,t), rgba(C.ink, .8), 3.5);
+  }
+
+  // tracks (what the agent believes about dark vessels)
+  for (const tr of A.tracks.values()){
+    const [fx3, fy3] = P(tr.fix.p[0], tr.fix.p[1]);
+    if (tr.status === 'dismissed'){
+      if (tr.back) continue;
+      ctx.setLineDash([3,3]); ctx.strokeStyle = rgba(C.ok, .9); ctx.beginPath(); ctx.arc(fx3,fy3,9,0,7); ctx.stroke(); ctx.setLineDash([]);
+      boat(fx3, fy3, 0, rgba(C.ink,.6), 3.5, false); label(`${tr.v.name} · DISMISSED`, fx3+13, fy3+4, C.ok, 10); continue;
+    }
+    const innocent = tr.droneKind === 'research', col = innocent ? C.ok : C.coral;
+    if (!tr.conf){
+      const pr = predict(tr, t), [px,py] = P(pr.p[0], pr.p[1]);
+      ctx.setLineDash([4,4]); ctx.strokeStyle = rgba(C.amber, .8); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(px, py, PX(pr.r), 0, 7); ctx.stroke(); ctx.setLineDash([]);
+      dashLine(tr.fix.p, pr.p, rgba(C.amber,.5));
+      label('?', px, py + 5, rgba(C.amber,.8), 16, 'center', 'display');
+      boat(fx3, fy3, heading(tr.v.pos, tr.fix.t), rgba(C.amber, .9), 5, false);
+      label(`LAST FIX ${hm(tr.fix.t)} · TRANSPONDER OFF`, fx3+14, fy3+18, C.amber, 10);
+      if (tr.lightPos){ const [lx,ly] = P(tr.lightPos[0], tr.lightPos[1]); const gl = ctx.createRadialGradient(lx,ly,0,lx,ly,30); gl.addColorStop(0, rgba(C.amber,.55)); gl.addColorStop(1, rgba(C.amber,0)); ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(lx,ly,30,0,7); ctx.fill(); label('BRIGHT LIGHTS', lx+18, ly+4, C.amber, 10); }
+    } else {
+      const [x,y] = P(tr.conf.p[0], tr.conf.p[1]);
+      boat(fx3, fy3, heading(tr.v.pos, tr.fix.t), rgba(C.amber, .35), 5, false);
+      dashLine(tr.fix.p, tr.conf.p, rgba(col,.5), 1, [2,3]);
+      if (tr.feats.lights && !innocent){ const gl = ctx.createRadialGradient(x,y,0,x,y,34); gl.addColorStop(0, rgba(C.amber,.45)); gl.addColorStop(1, rgba(C.amber,0)); ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(x,y,34,0,7); ctx.fill(); }
+      ctx.save(); ctx.translate(x,y); ctx.rotate(Math.PI/4); ctx.fillStyle = col; ctx.fillRect(-5,-5,10,10); ctx.restore();
+      brackets(x, y, 14 + 3*Math.sin(t*4), col);
+      label(innocent ? `${tr.v.name} · RESEARCH SHIP` : `DARK VESSEL · ${tr.hull || tr.v.len} M`, x+22, y-6, col, 11);
+      label(`RISK ${tr.p.toFixed(2)}`, x+22, y+8, rgba(col,.85), 10);
+    }
+  }
+
+  // patrol boats
+  for (const b of W.patrols){
+    const [x,y] = P(b.pos[0], b.pos[1]);
+    if (b.state === 'enroute'){ dashLine(b.pos, b.track.v.pos(t), rgba(C.ally,.6)); const eta = dist(b.pos, b.track.v.pos(t))*NM/b.kn*60; label(`${b.name} · ETA ${fmtEta(eta)}`, x+10, y-8, C.ally, 10); }
+    else if (b.state === 'returning') label(`${b.name} · RETURNING`, x+10, y-8, C.ok, 10);
+    else label(`${b.name}${b.status === 'busy' ? ' · BUSY' : b.status === 'lowfuel' ? ' · LOW FUEL' : ''}`, x+9, y-6, rgba(C.ally, b.status === 'ready' ? .85 : .4), 9);
+    ctx.save(); ctx.translate(x,y); ctx.rotate(Math.PI/4); ctx.fillStyle = b.status === 'ready' ? C.ally : rgba(C.ally,.35); ctx.fillRect(-4,-4,8,8); ctx.restore();
+  }
+  // drones
+  for (const d of W.drones){
+    const [x,y] = P(d.pos[0], d.pos[1]);
+    if (d.state === 'orbit'){ const [cx,cy] = P(d.c[0], d.c[1]); ctx.strokeStyle = rgba(C.ally, .2); ctx.beginPath(); ctx.arc(cx,cy,PX(.035),0,7); ctx.stroke(); }
+    if (d.state === 'enroute') dashLine(d.pos, predict(d.track, t).p, rgba(C.ally,.55));
+    const ok = d.status === 'ready';
+    ctx.save(); ctx.translate(x,y); ctx.rotate(d.hd); ctx.strokeStyle = ok ? C.ally : rgba(C.ally,.35); ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(-5,0); ctx.lineTo(6,0); ctx.moveTo(1,-6); ctx.lineTo(1,6); ctx.moveTo(-5,-3); ctx.lineTo(-5,3); ctx.stroke(); ctx.restore();
+    label(`${d.name}${ok ? '' : ' · MAINTENANCE'}`, x-10, y-8, rgba(C.ally, ok ? .9 : .45), 9, 'right');
+  }
+  // pings
+  for (const pg of pings){
+    const age = t - pg.t0; if (age < 0 || age > 2.2) continue;
+    const [x,y] = P(pg.p[0], pg.p[1]);
+    for (let k = 0; k < 2; k++){ const a = age - k*.45; if (a < 0) continue; ctx.strokeStyle = rgba(pg.col, Math.max(0, .8 - a/2)); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x,y,6 + a*38,0,7); ctx.stroke(); }
+  }
+  { const len = PX(20/60), x0 = 16, y0 = CH - 66; ctx.strokeStyle = rgba(C.ink,.5); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x0,y0-4); ctx.lineTo(x0,y0); ctx.lineTo(x0+len,y0); ctx.lineTo(x0+len,y0-4); ctx.stroke(); label('20 NM', x0 + len + 6, y0 + 3, rgba(C.ink,.5), 9); }
+}
+
+/* ================= evidence thumbnails ================= */
+function drawSAR(len){
+  const c = $('sar'), x = c.getContext('2d'), w = c.width, h = c.height, r = rng(len*97 + W.seed), img = x.createImageData(w,h), L = 16 + len*.25;
+  for (let i = 0; i < w*h; i++){
+    const px = i % w, py = (i/w)|0, dx = px - w*.52, dy = py - h*.5;
+    const rx = dx*Math.cos(.5) + dy*Math.sin(.5), ry = -dx*Math.sin(.5) + dy*Math.cos(.5);
+    const hull = Math.exp(-(rx*rx)/(2*L*L) - (ry*ry)/(2*5*5));
+    const v = 18 + r()*40 + hull*230*(.6 + r()*.4);
+    img.data[i*4] = img.data[i*4+1] = img.data[i*4+2] = Math.min(255, v); img.data[i*4+3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  x.strokeStyle = C.coral; x.lineWidth = 2; x.strokeRect(w*.52-L*1.9, h*.5-30, L*3.8, 60);
+  x.fillStyle = C.coral; x.font = `500 15px ${FMONO}`; x.fillText(`${len} m · no transponder`, 10, h-12);
+}
+function drawIR(kind, vtype){
+  const c = $('ir'), x = c.getContext('2d'), w = c.width, h = c.height, r = rng(11 + W.seed);
+  const bg = x.createLinearGradient(0,0,0,h); bg.addColorStop(0,'#1a1a22'); bg.addColorStop(1,'#0b0b10'); x.fillStyle = bg; x.fillRect(0,0,w,h);
+  for (let i = 0; i < 900; i++){ x.fillStyle = `rgba(255,255,255,${r()*.05})`; x.fillRect(r()*w, r()*h, 2, 2); }
+  if (kind === 'gear'){ x.strokeStyle = 'rgba(200,200,210,.35)'; x.lineWidth = 1.5; for (let i = 0; i < 6; i++){ x.beginPath(); x.moveTo(w*.62, h*.52); x.quadraticCurveTo(w*.85, h*(.3 + i*.09), w, h*(.15 + i*.15)); x.stroke(); } }
+  x.save(); x.translate(w*.45, h*.52); x.rotate(-.12);
+  const hg = x.createLinearGradient(-110,0,110,0); hg.addColorStop(0,'#8a8a92'); hg.addColorStop(.7,'#c9c9cf'); hg.addColorStop(1,'#9a9aa2');
+  x.fillStyle = hg; x.beginPath(); x.moveTo(-110,-14); x.lineTo(95,-14); x.lineTo(118,0); x.lineTo(95,16); x.lineTo(-110,16); x.closePath(); x.fill();
+  x.fillStyle = '#ececf2'; x.fillRect(-80,-28,50,16);
+  const eg = x.createRadialGradient(-70,2,0,-70,2,22); eg.addColorStop(0,'#ffffff'); eg.addColorStop(1,'rgba(255,255,255,0)'); x.fillStyle = eg; x.beginPath(); x.arc(-70,2,22,0,7); x.fill();
+  if (kind === 'gear'){
+    for (let i = 0; i < 9; i++){ x.fillStyle = '#ffffff'; x.beginPath(); x.arc(-10 + i*11, -6 + (i%3)*7, 2.6, 0, 7); x.fill(); }
+    for (let i = -100; i < 100; i += 16){ x.fillStyle = '#f4f4f8'; x.beginPath(); x.arc(i, -16, 2, 0, 7); x.fill(); }
+  } else {
+    x.strokeStyle = '#e6e6ec'; x.lineWidth = 3; x.beginPath(); x.moveTo(-100,-14); x.lineTo(-100,-44); x.lineTo(-76,-44); x.lineTo(-76,-14); x.stroke();
+    for (let i = 0; i < 3; i++){ x.fillStyle = '#ffffff'; x.beginPath(); x.arc(20 + i*16, -4, 2.6, 0, 7); x.fill(); }
+  }
+  x.restore();
+  x.fillStyle = '#ffffff'; x.font = `500 14px ${FMONO}`; x.fillText(kind === 'gear' ? `LWIR · ${vtype === 'Squid jigger' ? 'JIGGING LINES' : 'LONGLINES'} IN WATER · ${hm(S.t)}` : `LWIR · SURVEY FRAME, NO LINES · ${hm(S.t)}`, 10, 20);
+  x.strokeStyle = 'rgba(255,255,255,.6)'; x.lineWidth = 1; x.beginPath(); x.moveTo(w/2-12,h/2); x.lineTo(w/2+12,h/2); x.moveTo(w/2,h/2-12); x.lineTo(w/2,h/2+12); x.stroke();
+}
+
+/* ================= stage chips, status, summary ================= */
+function stagesAndStatus(){
+  const m = A.main, set = (n, s) => { const li = document.querySelector(`#stages li[data-s="${n}"]`); if (li && li.className !== s) li.className = s; };
+  const closed = m && m.status === 'closed';
+  set('DETECT', m ? (m.obs.has('lights') || m.radarDone ? 'done' : 'active') : '');
+  set('VERIFY', m ? (m.radarDone || m.droneKind ? 'done' : 'active') : '');
+  set('SCORE', m ? (m.escalated || closed ? 'done' : 'active') : '');
+  set('DISPATCH', m && (m.drone || m.patrol) ? (m.escalated || closed ? 'done' : 'active') : '');
+  set('ESCALATE', m && m.escalated ? (A.decision ? 'done' : 'active') : '');
+  set('HUMAN', A.decision ? 'done' : '');
+  let txt = 'WATCHING', cls = 'calm';
+  if (A.flagged.size && !m){ txt = 'WATCHING CLOSELY'; cls = 'warn'; }
+  if (m){ txt = 'INVESTIGATING'; cls = m.p >= .25 ? 'crit' : 'warn'; }
+  if (m && (m.drone || m.patrol)){ txt = 'ACTING'; cls = 'crit'; }
+  if (m && m.escalated){ txt = 'WAITING ON COMMANDER'; cls = 'warn'; }
+  if (A.decision){ txt = 'COMPLETE'; cls = 'ok'; }
+  if (closed){ txt = 'CLOSED · NO ACTION'; cls = 'ok'; }
+  const st = $('status'); if (st.textContent !== txt){ st.textContent = txt; st.className = 'status ' + cls; }
+  const dark = [...A.tracks.values()].filter(tr => tr.status !== 'dismissed').length;
+  $('mDark').textContent = dark; $('mDark').className = dark ? 'crit' : '';
+}
+function showSummary(){
+  const m = A.main, innocent = m && m.droneKind === 'research';
+  if (innocent){
+    $('sumHead').textContent = m.patrol ? 'Research ship identified, patrol stood down' : 'Research ship identified, nobody disturbed';
+    $('sumT1').textContent = hm(m.since); $('sumL1').textContent = 'Transponder went silent';
+    $('sumT2').textContent = hm(m.obsAt); $('sumL2').textContent = 'Drone identified the ship';
+    $('sumT3').textContent = hm(m.closedT); $('sumL3').textContent = 'Case closed, no boarding';
+  } else {
+    $('sumHead').textContent = A.decision && A.decision.board ? `Dark vessel caught, ${A.pages} human decision` : `Dark vessel shadowed, ${A.pages} human decision`;
+    $('sumT1').textContent = hm(m.since); $('sumL1').textContent = 'Transponder went silent';
+    $('sumT2').textContent = hm(m.escalated); $('sumL2').textContent = 'Evidence package ready';
+    $('sumT3').textContent = hm(A.decision.t); $('sumL3').textContent = 'Commander decided';
+  }
+  $('sumVessels').textContent = W.vessels.length; $('sumFalse').textContent = A.dismissed; $('sumSpend').textContent = `$${A.budget}`; $('sumPages').textContent = A.pages;
+  $('sumSeed').textContent = `Night #${W.seed} · press New night for a different scenario`;
+  $('summary').hidden = false;
+}
+
+/* ================= waveform ================= */
+function drawWave(t){
+  if ($('call').hidden) return;
+  const c = $('wave'), x = c.getContext('2d'), w = c.width, h = c.height; x.clearRect(0,0,w,h);
+  const cur = S.lines.filter(l => t >= l.t && t < l.t + l.dur).pop();
+  const col = cur ? (cur.who === 'agent' ? C.seaglass : C.ally) : C['ink-3'], n = 54, bw = w/n;
+  for (let i = 0; i < n; i++){
+    const amp = cur ? (.25 + .75*Math.abs(Math.sin(i*.7 + t*9) * Math.sin(i*.23 + t*3.1))) : .06, bh = Math.max(2*DPR, amp*h*.9);
+    x.fillStyle = col; x.fillRect(i*bw + bw*.2, (h-bh)/2, bw*.6, bh);
+  }
+  const s = Math.max(0, Math.floor((t - (A.callStart || t))*60/10));
+  $('callTime').textContent = `${String(s/60|0).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+}
+
+/* ================= main loop ================= */
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(.05, (now - last)/1000); last = now;
+  if (S.playing) S.t += dt*S.speed;
+  const t = S.t;
+  while (A.tickT + TICK <= t){ A.tickT += TICK; step(A.tickT); }
+  A.now = t;
+  if (A.askAt !== null && !A.decision){
+    if (t >= A.askAt){
+      if ($('decide').hidden){
+        const tr = A.askTrack, v = tr.v;
+        $('decTitle').textContent = `Board ${v.name}?`;
+        const items = [`Transponder off ${nmTxt(tr.sd)} ${tr.sd > 0 ? 'outside' : 'inside'} the boundary at ${hm(tr.since)}`];
+        if (tr.radarDone) items.push(`Radar hull about ${tr.hull} m inside the reserve, no transponder`);
+        if (tr.feats.lights) items.push('Night lights consistent with fishing');
+        if (tr.droneKind === 'gear') items.push(`Thermal video of ${v.type === 'Squid jigger' ? 'jigging lines' : 'longline gear'} in the water`);
+        items.push(`No reserve fishing license, ${v.prior} earlier transponder gap${v.prior === 1 ? '' : 's'} in 90 days`);
+        items.push(`Risk ${tr.p.toFixed(2)} from the logistic model`);
+        $('decList').innerHTML = items.map(s => `<li>${s}</li>`).join('');
+        $('decide').hidden = false;
+      }
+      const left = Math.max(0, Math.ceil(A.askAt + 8 - t)); $('autoNote').textContent = `Demo picks boarding in ${left} s`;
+      $('bBoard').classList.toggle('armed', left <= 3);
+      if (t >= A.askAt + 8) decide(true);
+    }
+  }
+  if (A.endT !== null && !A.summaryShown && t >= A.endT + 6){ A.summaryShown = true; showSummary(); }
+  $('clock').textContent = fmtClock(t);
+  $('tplus').textContent = `T+${String(Math.floor(t/60)).padStart(2,'0')}:${String(Math.floor(t%60)).padStart(2,'0')}`;
+  if (A.main){
+    const m = A.main; $('gap').textContent = `${Math.floor(t - m.since)} min`;
+    if (m._p !== m.p || m._n !== m.obs.size){ m._p = m.p; m._n = m.obs.size; renderRisk(m); }
+    S.pShown += (m.p - S.pShown)*Math.min(1, dt*4);
+  }
+  const tr = tierFor(S.pShown + 1e-4);
+  $('riskVal').textContent = S.pShown.toFixed(2); $('riskVal').style.color = C[tr[2]];
+  $('needle').style.left = (S.pShown*100) + '%'; $('tnow').innerHTML = `Allowed now: <b>${tr[1]}</b>. Boarding: human only.`;
+  stagesAndStatus();
+  draw(t); drawWave(t);
+  requestAnimationFrame(frame);
+}
+
+/* ================= controls ================= */
+let seed = Math.floor(Math.random()*90000) + 10000;
+const setPlay = p => { S.playing = p; $('bPlay').textContent = p ? 'Pause' : 'Play'; };
+const newNight = () => { seed = Math.floor(Math.random()*90000) + 10000; startNight(seed); setPlay(true); };
+$('bPlay').onclick = () => setPlay(!S.playing);
+$('bRestart').onclick = () => { startNight(seed); setPlay(true); };
+$('bNew').onclick = newNight;
+$('bNew2').onclick = newNight;
+$('bReplay').onclick = () => { startNight(seed); setPlay(true); };
+$('bSpeed').onclick = () => { S.speed = S.speed === 1 ? 2 : S.speed === 2 ? .5 : 1; $('bSpeed').textContent = `Speed ${S.speed === .5 ? '½' : S.speed}×`; };
+$('bVoice').onclick = () => { S.voice = !S.voice; $('bVoice').textContent = S.voice ? 'Voice on' : 'Voice off'; $('bVoice').setAttribute('aria-pressed', S.voice); if (!S.voice) try { speechSynthesis.cancel(); } catch (e) {} };
+$('bClean').onclick = () => document.body.classList.add('clean');
+$('bRestore').onclick = () => document.body.classList.remove('clean');
+document.addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input,textarea')) return;
+  if (e.code === 'Space'){ e.preventDefault(); setPlay(!S.playing); }
+  else if (e.key === 'r' || e.key === 'R'){ startNight(seed); setPlay(true); }
+  else if (e.key === 'n' || e.key === 'N') newNight();
+  else if (e.key === 'h' || e.key === 'H') document.body.classList.toggle('clean');
+});
+try { speechSynthesis.getVoices(); } catch (e) {}
+new ResizeObserver(resize).observe($('mapbox'));
+resize();
+const hs = (location.hash || '').match(/^#n(\d{1,6})$/); if (hs) seed = +hs[1];
+startNight(seed);
+requestAnimationFrame(frame);
+})();
+
+</script>
+
+
+</body>
+</html>
